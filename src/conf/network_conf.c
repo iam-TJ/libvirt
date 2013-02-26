@@ -1882,6 +1882,13 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
             if (ret < 0)
                 goto error;
             def->nips++;
+	    /* use only the first enabled DHCP definition */
+	    if (!def->ipv4_dhcp && def->ips[ii].dhcp_enabled &&
+		VIR_SOCKET_ADDR_IS_FAMILY(&def->ips[ii].address, AF_INET))
+		def->ipv4_dhcp = &def->ips[ii];
+	    if (!def->ipv6_dhcp && def->ips[ii].dhcp_enabled &&
+		VIR_SOCKET_ADDR_IS_FAMILY(&def->ips[ii].address, AF_INET6))
+		def->ipv6_dhcp = &def->ips[ii];
         }
     }
     VIR_FREE(ipNodes);
