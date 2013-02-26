@@ -828,6 +828,19 @@ virNetworkDHCPDefParseXML(const char *networkName,
 {
 
     xmlNodePtr cur;
+    char *tmp = NULL;
+
+    def->dhcp_enabled = true;
+    if ((tmp = virXMLPropString(node, "enabled"))) {
+        def->dhcp_enabled = strncmp("no", tmp, 2) == 0 ? false : def->dhcp_enabled;
+        VIR_FREE(tmp);
+    }
+
+    def->dhcp_relay = false;
+    if ((tmp = virXMLPropString(node, "relay"))) {
+        def->dhcp_relay = strncmp("yes", tmp, 3) == 0 ? true : def->dhcp_relay;
+	VIR_FREE(tmp);
+    }
 
     cur = node->children;
     while (cur != NULL) {
@@ -2180,12 +2193,19 @@ virNetworkIpDefFormat(virBufferPtr buf,
         virBufferEscapeString(buf, "<tftp root='%s' />\n",
                               def->tftproot);
     }
-    if ((def->nranges || def->nhosts)) {
+    if ((def->nranges || def->nhosts) || 
+         !def->dhcp_enabled || def->dhcp_relay) {
         int ii;
-        virBufferAddLit(buf, "<dhcp>\n");
+        virBufferAddLit(buf, "<dhcp");
+        if (!def->dhcp_enabled)
+	    virBufferAddLit(buf, " enabled='no'");
+	if (def->dhcp_relay)
+	    virBufferAddLit(buf, " relay='yes'");
+	virBufferAddLit(buf, ">\n");
+
         virBufferAdjustIndent(buf, 2);
 
-        for (ii = 0 ; ii < def->nranges ; ii++) {
+        for (ii = 0 ; def->nranges && ii < def->nranges ; ii++) {
             char *saddr = virSocketAddrFormat(&def->ranges[ii].start);
             if (!saddr)
                 goto error;
@@ -2199,7 +2219,7 @@ virNetworkIpDefFormat(virBufferPtr buf,
             VIR_FREE(saddr);
             VIR_FREE(eaddr);
         }
-        for (ii = 0 ; ii < def->nhosts ; ii++) {
+        for (ii = 0 ; def->nhosts && ii < def->nhosts ; ii++) {
             virBufferAddLit(buf, "<host ");
             if (def->hosts[ii].mac)
                 virBufferAsprintf(buf, "mac='%s' ", def->hosts[ii].mac);
