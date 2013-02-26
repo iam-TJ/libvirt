@@ -951,11 +951,12 @@ networkDnsmasqConfContents(virNetworkObjPtr network,
 
     ipv4def = ipv6def = NULL;
     ipdef = network->def->ipv4_dhcp;
-    if (ipdef && (ipdef->nranges || ipdef->nhosts))
+    if (ipdef && ipdef->dhcp_enabled && !ipdef->dhcp_relay &&
+        (ipdef->nranges || ipdef->nhosts))
         ipv4def = ipdef;
 
     ipdef = network->def->ipv6_dhcp;
-    if (ipdef) {
+    if (ipdef && ipdef->dhcp_enabled && !ipdef->dhcp_relay) {
         if (ipdef->nranges || ipdef->nhosts) {
             ipv6def = ipdef;
 
@@ -1266,8 +1267,8 @@ static int
 networkRefreshDhcpDaemon(struct network_driver *driver,
                          virNetworkObjPtr network)
 {
-    int ret = -1, ii;
-    virNetworkIpDefPtr ipdef, ipv4def, ipv6def;
+    int ret = -1;
+    virNetworkIpDefPtr ipv4def, ipv6def;
     dnsmasqContext *dctx = NULL;
 
     /* if no IP addresses specified, nothing to do */
