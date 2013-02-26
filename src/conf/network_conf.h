@@ -144,6 +144,10 @@ struct _virNetworkIpDef {
     char *bootfile;
     virSocketAddr bootserver;
 
+    /* when false no DHCP server is started */
+    bool dhcp_enabled;
+    /* when true ranges are ignored and a DHCP relay-agent started */
+    bool dhcp_relay;
    };
 
 typedef struct _virNetworkForwardIfDef virNetworkForwardIfDef;
@@ -234,6 +238,7 @@ typedef virNetworkObj *virNetworkObjPtr;
 struct _virNetworkObj {
     virMutex lock;
 
+    pid_t dhcprelayPid;
     pid_t dnsmasqPid;
     pid_t radvdPid;
     unsigned int active : 1;
