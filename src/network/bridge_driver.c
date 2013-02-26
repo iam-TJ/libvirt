@@ -810,24 +810,16 @@ networkDnsmasqConfContents(virNetworkObjPtr network,
         }
     }
 
-    /* Find the first dhcp for both IPv4 and IPv6 */
-    for (ii = 0, ipv4def = NULL, ipv6def = NULL, ipv6SLAAC = false;
-         (ipdef = virNetworkDefGetIpByIndex(network->def, AF_UNSPEC, ii));
-         ii++) {
-        if (VIR_SOCKET_ADDR_IS_FAMILY(&ipdef->address, AF_INET)) {
-            if (ipdef->nranges || ipdef->nhosts) {
-                if (ipv4def) {
-                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                                   _("For IPv4, multiple DHCP definitions "
-                                     "cannot be specified."));
-                    goto cleanup;
-                } else {
-                    ipv4def = ipdef;
-                }
-            }
-        }
-        if (VIR_SOCKET_ADDR_IS_FAMILY(&ipdef->address, AF_INET6)) {
-            if (ipdef->nranges || ipdef->nhosts) {
+    ipv4def = ipv6def = NULL;
+    ipdef = network->def->ipv4_dhcp;
+    if (ipdef && (ipdef->nranges || ipdef->nhosts))
+        ipv4def = ipdef;
+
+    ipdef = network->def->ipv6_dhcp;
+    if (ipdef) {
+        if (ipdef->nranges || ipdef->nhosts) {
+            ipv6def = ipdef;
+
                 if (!DNSMASQ_DHCPv6_SUPPORT(caps)) {
                     unsigned long version = dnsmasqCapsGetVersion(caps);
                     virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -842,18 +834,9 @@ networkDnsmasqConfContents(virNetworkObjPtr network,
                                    DNSMASQ_DHCPv6_MINOR_REQD);
                     goto cleanup;
                 }
-                if (ipv6def) {
-                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                                   _("For IPv6, multiple DHCP definitions "
-                                     "cannot be specified."));
-                    goto cleanup;
-                } else {
-                    ipv6def = ipdef;
-                }
-            } else {
-                ipv6SLAAC = true;
-            }
-        }
+	}
+    } else {
+        ipv6SLAAC = true;
     }
 
     if (ipv6def && ipv6SLAAC) {
@@ -1160,25 +1143,9 @@ networkRefreshDhcpDaemon(struct network_driver *driver,
     if (!(dctx = dnsmasqContextNew(network->def->name, DNSMASQ_STATE_DIR)))
         goto cleanup;
 
-    /* Look for first IPv4 address that has dhcp defined.
-     * We only support dhcp-host config on one IPv4 subnetwork
-     * and on one IPv6 subnetwork.
-     */
-    ipv4def = NULL;
-    for (ii = 0;
-         (ipdef = virNetworkDefGetIpByIndex(network->def, AF_INET, ii));
-         ii++) {
-        if (!ipv4def && (ipdef->nranges || ipdef->nhosts))
-            ipv4def = ipdef;
-    }
+    ipv4def = network->def->ipv4_dhcp;
 
-    ipv6def = NULL;
-    for (ii = 0;
-         (ipdef = virNetworkDefGetIpByIndex(network->def, AF_INET6, ii));
-         ii++) {
-        if (!ipv6def && (ipdef->nranges || ipdef->nhosts))
-            ipv6def = ipdef;
-    }
+    ipv6def = network->def->ipv6_dhcp;
 
     if (ipv4def && (networkBuildDnsmasqDhcpHostsList(dctx, ipv4def) < 0))
            goto cleanup;
