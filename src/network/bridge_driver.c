@@ -587,6 +587,145 @@ cleanup:
      * which is later saved into a file
      */
 
+static virNetworkIpDefPtr
+networkGetActiveDhcp(virNetworkObjPtr network)
+{
+    virNetworkIpDefPtr dhcp = NULL;
+
+    if (network->def && network->def->ipv4_dhcp)
+        dhcp = network->def->ipv4_dhcp;
+
+    if (!dhcp &&
+        network->def && network->def->ipv6_dhcp)
+        dhcp = network->def->ipv6_dhcp;
+
+    return dhcp;
+}
+
+static int
+networkBuildDhcpRelayArgv(virNetworkObjPtr network,
+                        const char *pidfile,
+                        virCommandPtr cmd)
+{
+    int ret = -1;
+
+    /* PID file */
+    virCommandAddArgList(cmd, "-r", pidfile, NULL);
+
+    /* Listen for DHCP requests on the bridge interface */
+    virCommandAddArgList(cmd, "-i", network->def->bridge, NULL);
+
+    /* Use the first forwarding device to broadcast to the upstream DHCP server */
+    if (network->def->forward.nifs > 0) {
+        virCommandAddArgList(cmd, "-b", network->def->forward.ifs[0].device.dev, NULL);
+	ret = 0;
+    } else
+	virReportSystemError(VIR_ERR_INVALID_INTERFACE,
+	    _("DHCP relay requires at least one network %s\n"),
+              "<forward ... dev='eth?'/> or <interface dev='eth?'/>");
+
+    return ret;
+}
+
+static int
+networkBuildDhcpRelayCommandLine(virNetworkObjPtr network, virCommandPtr *cmdout,
+                                  char *pidfile)
+{
+    virCommandPtr cmd = NULL;
+    int ret = -1;
+
+    cmd = virCommandNew(DHCPRELAY);
+    if (networkBuildDhcpRelayArgv(network, pidfile, cmd) < 0) {
+        goto cleanup;
+    }
+
+    if (cmdout)
+        *cmdout = cmd;
+    ret = 0;
+cleanup:
+    if (ret < 0)
+        virCommandFree(cmd);
+    return ret;
+}
+
+static int
+networkStartDhcpRelayDaemon(struct network_driver *driver ATTRIBUTE_UNUSED,
+                             virNetworkObjPtr network)
+{
+    virCommandPtr cmd = NULL;
+    virNetworkIpDefPtr ipdef = NULL;
+    char *pidfile = NULL;
+    char *tmp = NULL;
+    int pid_len;
+    int ret = 0;
+    const char *dhcprelay = "dhcprelay_";
+
+    ipdef = networkGetActiveDhcp(network);
+    /* Prepare for DHCP relay agent */
+    if (ipdef && ipdef->dhcp_enabled && ipdef->dhcp_relay) {
+	ret = -1;
+
+        if (virFileMakePath(NETWORK_PID_DIR) < 0) {
+            virReportSystemError(errno,
+                                 _("cannot create directory %s"),
+                                 NETWORK_PID_DIR);
+            goto cleanup;
+        }
+
+        pid_len = strlen(dhcprelay) + strlen(network->def->name);
+        if ( VIR_ALLOC_N(tmp, pid_len+1) >= 0) {
+	    tmp = strcpy(tmp, dhcprelay);
+	    tmp = strncat(tmp, network->def->name, pid_len);
+	    if (!(pidfile = virPidFileBuildPath(NETWORK_PID_DIR, tmp))) {
+	        virReportOOMError();
+	        goto cleanup;
+	    }
+        } else {
+	    virReportOOMError();
+	    goto cleanup;
+	}
+
+        ret = networkBuildDhcpRelayCommandLine(network, &cmd, pidfile);
+        if (ret < 0)
+	    goto cleanup;
+
+        ret = virCommandRun(cmd, NULL);
+        if (ret < 0)
+	    goto cleanup;
+	
+        ret = virPidFileRead(NETWORK_PID_DIR, pidfile, &network->dhcprelayPid);
+        if (ret < 0)
+	    virReportSystemError(errno, _("%s is not running"), DHCPRELAY);
+
+cleanup:
+        VIR_FREE(tmp);
+        VIR_FREE(pidfile);
+        virCommandFree(cmd);
+    }
+    return ret;
+}
+
+static int
+networkRestartDhcpRelayDaemon(struct network_driver *driver,
+                              virNetworkObjPtr network)
+{
+    /* if there is a running DHCP relay agent, kill it */
+    if (network->dhcprelayPid > 0) {
+        networkKillDaemon(network->dhcprelayPid, DHCPRELAY,
+                          network->def->name);
+        network->dhcprelayPid = -1;
+    }
+    /* now start the daemon if it should be started */
+    return networkStartDhcpRelayDaemon(driver, network);
+}
+
+static int
+networkRefreshDhcpRelayDaemon(struct network_driver *driver,
+                              virNetworkObjPtr network)
+{
+    return networkRestartDhcpRelayDaemon(driver, network);
+}
+
 static int
 networkBuildDnsmasqDhcpHostsList(dnsmasqContext *dctx,
                                  virNetworkIpDefPtr ipdef)
@@ -1496,6 +1635,7 @@ networkRefreshDaemons(struct network_driver *driver)
              * dnsmasq and/or radvd, or restart them if they've
              * disappeared.
              */
+            networkRefreshDhcpRelayDaemon(driver, network);
             networkRefreshDhcpDaemon(driver, network);
             networkRefreshRadvd(driver, network);
         }
@@ -2462,6 +2602,10 @@ networkStartNetworkVirtual(struct network_driver *driver,
         networkStartDhcpDaemon(driver, network) < 0)
         goto err3;
 
+    /* start DHCP relay-agent (doesn't need IP address(es) to function) */
+    if (networkStartDhcpRelayDaemon(driver, network) < 0)
+	goto err3;
+
     /* start radvd if there are any ipv6 addresses */
     if (v6present && networkStartRadvd(driver, network) < 0)
         goto err4;
@@ -3275,6 +3419,8 @@ networkUpdate(virNetworkPtr net,
              * so we need to kill and restart dnsmasq.
              */
             if (networkRestartDhcpDaemon(driver, network) < 0)
+                goto cleanup;
+            if (networkRestartDhcpRelayDaemon(driver, network) < 0)
                 goto cleanup;
 
         } else if (section == VIR_NETWORK_SECTION_IP_DHCP_HOST) {
