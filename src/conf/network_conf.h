@@ -231,6 +231,8 @@ struct _virNetworkDef {
     virPortGroupDefPtr portGroups;
     virNetDevBandwidthPtr bandwidth;
     virNetDevVlan vlan;
+    virNetworkIpDefPtr ipv4_dhcp;
+    virNetworkIpDefPtr ipv6_dhcp;
 };
 
 typedef struct _virNetworkObj virNetworkObj;
