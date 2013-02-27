@@ -650,12 +650,20 @@
           <dt><code>dhcp</code></dt>
           <dd>Also within the <code>ip</code> element there is an
             optional <code>dhcp</code> element. The presence of this element
-            enables DHCP services on the virtual network. It will further
+            enables DHCP services on the virtual network. It can further
             contain one or more <code>range</code> elements. The
             <code>dhcp</code> element supported for both
             IPv4 <span class="since">Since 0.3.0</span>
             and IPv6 <span class="since">Since 1.0.1</span>, but
             only for one IP address of each type per network.
+            Since $TODO.$FIXME it can optionally contain a boolean <code>enable</code> attribute
+            ('yes' or 'no') where the value defaults to 'yes', and a boolean
+            <code>relay</code> attribute where the value defaults to 'no'.
+            When <code>relay='yes'</code> any settings within the <code>dhcp</code> block
+            are ignored and a DHCP relay agent is started instead of a local DHCP server.
+            The DHCP relay daemon will listen on the network's bridge interface for
+            DHCP/BOOTP traffic and relay it via broadcast from the first interface declared
+            in the <code>forward</code> element.
             <dl>
               <dt><code>range</code></dt>
               <dd>The <code>start</code> and <code>end</code> attributes on the
@@ -779,6 +787,18 @@
         &lt;ip family="ipv6" address="2001:db8:ca2:2::1" prefix="64" /&gt;
       &lt;/network&gt;</pre>
 
+    <p>Here is the same configuration using a DHCP relay agent instead of a local DHCP server.</p>
+    <pre>
+      &lt;network&gt;
+        &lt;name&gt;local&lt;/name&gt;
+        &lt;bridge name="virbr1" /&gt;
+        &lt;forward mode="route" dev="eth1"/&gt;
+        &lt;ip address="192.168.122.1" netmask="255.255.255.0"&gt;
+          &lt;dhcp relay='yes'/&gt;
+        &lt;/ip&gt;
+        &lt;ip family="ipv6" address="2001:db8:ca2:2::1" prefix="64" /&gt;
+      &lt;/network&gt;</pre>
+ 
     <p>
       Below is another IPv6 varition.  Instead of a dhcp range being
       specified, this example has a couple of IPv6 host definitions.
